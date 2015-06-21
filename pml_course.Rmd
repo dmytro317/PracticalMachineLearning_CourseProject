@@ -1,0 +1,96 @@
+---
+title: "Human Activity Recognition"
+output: html_document
+author: Dmytro Kliagin
+---
+
+# Overview
+
+In this document we attempt to fit a model to predict the type of a physical activity
+performed by people based on the data from wearable accelerometers.
+
+Detailed information on the dataset is available
+[http://groupware.les.inf.puc-rio.br/har](through this link).
+
+The dataset contains wearables observation points for six different people
+at different time. From the description of the dataset:
+
+    Six young health participants were asked to perform one set of 10 repetitions
+    of the Unilateral Dumbbell Biceps Curl in five different fashions:
+    exactly according to the specification (Class A),
+    throwing the elbows to the front (Class B),
+    lifting the dumbbell only halfway (Class C),
+    lowering the dumbbell only halfway (Class D)
+    and throwing the hips to the front (Class E).
+
+# Fitting the Model
+
+Required libraries:
+
+```{r}
+library(caret)
+library(doParallel)
+```
+
+As the first step, we're reading the data. It is assumed the files are already downloaded.
+Looking at the downloaded files, there are a number of values that are empty or NA, or "#DIV/0!",
+so we have to clean data out of those:
+
+```{r}
+train_data <- read.csv("pml-training.csv", header=TRUE, quote="\"", na.strings = c("NA", "", "#DIV/0!"))
+test_data <- read.csv("pml-testing.csv", header=TRUE, quote="\"", na.strings = c("NA", "", "#DIV/0!"))
+```
+
+Input files contain observations for a large number of variables.
+A lot of them may not be relevant to fitting the model.
+For example, most people do the same excercise in roughly similar way regardless from when they
+are doing it, so we can exclude this variables:
+
+```{r}
+irrelevant <- c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window")
+```
+
+Large number of variables have mostly NA values and are somehow derived from other data, for example,
+max/min value, variance, standard deviation, etc. Those variables should be excluded as well:
+
+```{r}
+cols <- colnames(train_data)
+irrelevant <- c(irrelevant, cols[grepl("^max", cols)])
+irrelevant <- c(irrelevant, cols[grepl("^min", cols)])
+irrelevant <- c(irrelevant, cols[grepl("^stddev", cols)])
+irrelevant <- c(irrelevant, cols[grepl("^var", cols)])
+irrelevant <- c(irrelevant, cols[grepl("^avg", cols)])
+irrelevant <- c(irrelevant, cols[grepl("^total", cols)])
+irrelevant <- c(irrelevant, cols[grepl("^amplitude", cols)])
+irrelevant <- c(irrelevant, cols[grepl("^kurtosis", cols)])
+irrelevant <- c(irrelevant, cols[grepl("^skewness", cols)])
+```
+
+In order to estimate out of sample error, let's split our train_data into parts to fit a model
+and to do cross-validation:
+
+```{r}
+set.seed(123)
+inTrain <- createDataPartition(y = train_data$classe, p = 0.6, list = FALSE)
+training <- train_data[inTrain, sapply(cols, function(c) { !(c %in% irrelevant) } )]
+crossval <- train_data[-inTrain, sapply(cols, function(c) { !(c %in% irrelevant) } )]
+```
+
+Let's fit boosted tree model:
+
+```{r cache=TRUE}
+cluster <- makeCluster(detectCores())
+registerDoParallel(cluster)
+modelFit <- train(classe ~ ., data = training, method = "gbm")
+```
+
+Estimating out of sample error:
+
+```{r}
+predictions <- predict(modelFit, newdata = crossval)
+confusionMatrix(predictions, crossval$classe)
+```
+
+# Summary
+
+We fitted a tree model for the train dataset and received estimated 96% out of sample accuracy.
